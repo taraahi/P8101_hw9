@@ -1,0 +1,73 @@
+---
+title: "Lab 10 Student Problems"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+
+## Student Problem 01
+
+We will be working with a cleaned version of last week's dataset that examines the relationship between employment type and the occurrence of stroke.
+
+(1) Load the dataset into your environment and take a look.
+
+```{r}
+
+
+```
+
+(2) Create a descriptive table of the entire dataset using gtsummary::tbl_summary().
+
+Include better labels for each variable.
+
+Change the summary statistic from Median(IQR) to Mean(SD); (Min, Max)
+
+```{r}
+
+
+
+```
+
+(3) Create a new table split by employment category.
+
+Add a column that shows the p-value for tests for differences in each variable across work categories.
+
+Ensure that all tests work and that continuous variables are being tested using one-way ANOVA.
+
+```{r}
+
+
+
+```
+
+(4) Calculate the proportion positive for stroke and it's 95% confidence interval for each work category using the traditional Wald formula:
+
+$$\hat{p}\pm1.96*\sqrt{\frac{\hat{p}(1-\hat{p})}{n}}$$
+
+```{r}
+
+
+
+```
+
+(5) Graph these confidence intervals using `geom_pointrange()`.
+
+```{r}
+
+
+
+```
+
+(6) Now calculate the same confidence intervals using bootstrapping and create a faceted graph of the bootstrapped distributions by work category.
+
+
+```{r}
+
+
+
+```
+
+(7) Compare your Wald and bootstrapped CI.

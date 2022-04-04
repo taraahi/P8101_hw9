@@ -1,0 +1,228 @@
+---
+title: "Lab 10 Student Problems"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+
+## Student Problem 01
+
+We will be working with a cleaned version of last week's dataset that examines the relationship between employment type and the occurrence of stroke.
+
+(1) Load the dataset into your environment and take a look.
+
+```{r}
+
+library(tidyverse)
+
+stroke_raw <- read_csv("data/stroke_data.csv")
+
+```
+
+(2) Create a descriptive table of the entire dataset using gtsummary::tbl_summary().
+
+Include better labels for each variable.
+
+Change the summary statistic from Median(IQR) to Mean(SD); (Min, Max)
+
+```{r}
+
+library(gtsummary)
+
+stroke_raw %>%
+  select(stroke, everything(), -id) %>% #ordering the variables
+  mutate(bmi = as.numeric(bmi)) %>% #fixing BMI to be numeric
+  mutate(smoking_status = factor(smoking_status, levels = c("never smoked", #changing the order of the levels
+                                                            "formerly smoked",
+                                                            "smokes"))) %>% 
+  tbl_summary(label = list(stroke ~ "Stroke Occurred",
+                           gender ~ "Gender",
+                           age ~ "Age",
+                           hypertension ~ "Hypertension Positive",
+                           heart_disease ~ "Heart Disease Positive",
+                           Residence_type ~ "Residence Type",
+                           ever_married ~ "Ever Married",
+                           avg_glucose_level ~ "Average Glucose Level",
+                           bmi ~ "BMI",
+                           smoking_status ~ "Smoking Status",
+                           work_cl ~ "Employment Type"),
+              missing_text = "Missing", # change the text used to describe missing
+              statistic = all_continuous() ~ "{mean} ({sd}); ({min}, {max})") %>% # custom summary statistics
+  bold_labels()
+
+
+```
+
+(3) Create a new table split by employment category.
+
+Add a column that shows the p-value for tests for differences in each variable across work categories.
+
+Ensure that all tests work and that continuous variables are being tested using one-way ANOVA.
+
+```{r}
+
+stroke_raw %>%
+  select(stroke, everything(), -id) %>%
+  mutate(bmi = as.numeric(bmi)) %>%
+  mutate(smoking_status = factor(smoking_status, levels = c("never smoked",
+                                                            "formerly smoked",
+                                                            "smokes"))) %>%
+  tbl_summary(by = work_cl, # add by to create different columns split 
+              label = list(stroke ~ "Stroke Occurred",
+                           gender ~ "Gender",
+                           age ~ "Age",
+                           hypertension ~ "Hypertension Positive",
+                           heart_disease ~ "Heart Disease Positive",
+                           Residence_type ~ "Residence Type",
+                           ever_married ~ "Ever Married",
+                           avg_glucose_level ~ "Average Glucose Level",
+                           bmi ~ "BMI",
+                           smoking_status ~ "Smoking Status"),
+              missing_text = "Missing",
+              statistic = all_continuous() ~ "{mean} ({sd}); ({min}, {max})") %>%
+  bold_labels() %>%
+  add_overall() # add an overall column
+
+# add a p-value
+
+stroke_raw %>%
+  select(stroke, everything(), -id) %>%
+  mutate(bmi = as.numeric(bmi)) %>%
+  mutate(smoking_status = factor(smoking_status, levels = c("never smoked",
+                                                            "formerly smoked",
+                                                            "smokes"))) %>%
+  tbl_summary(by = work_cl, 
+              label = list(stroke ~ "Stroke Occurred",
+                           gender ~ "Gender",
+                           age ~ "Age",
+                           hypertension ~ "Hypertension Positive",
+                           heart_disease ~ "Heart Disease Positive",
+                           Residence_type ~ "Residence Type",
+                           ever_married ~ "Ever Married",
+                           avg_glucose_level ~ "Average Glucose Level",
+                           bmi ~ "BMI",
+                           smoking_status ~ "Smoking Status"),
+              missing_text = "Missing",
+              statistic = all_continuous() ~ "{mean} ({sd}); ({min}, {max})") %>%
+  bold_labels() %>%
+  add_p(test = all_continuous() ~ "aov", # adding a p-value
+        test.args = all_tests("fisher.test") ~ list(simulate.p.value = TRUE)) # change options for a test that generates the pvalue
+
+
+```
+
+(4) Calculate the proportion positive for stroke and it's 95% confidence interval for each work category using the traditional Wald formula:
+
+$$\hat{p}\pm1.96*\sqrt{\frac{\hat{p}(1-\hat{p})}{n}}$$
+
+```{r}
+
+prop_summary <- stroke_raw %>%
+  group_by(work_cl) %>%
+  summarize(n_stroke = sum(stroke),
+            n_total = n()) %>%
+  mutate(p_hat = n_stroke/n_total,
+         se = sqrt(p_hat*(1-p_hat)/n_total),
+         lower_ci = p_hat - 1.96*se,
+         upper_ci = p_hat + 1.96*se)
+
+```
+
+(5) Graph these confidence intervals using `geom_pointrange()`.
+
+```{r}
+
+ggplot(data = prop_summary) +
+  geom_pointrange(aes(x = work_cl, y = p_hat, ymin = lower_ci, ymax = upper_ci)) +
+  theme_bw()
+
+
+
+```
+
+(6) Now calculate the same confidence intervals using bootstrapping and create a faceted graph of the bootstrapped distributions by work category.
+
+
+```{r}
+
+# Function to obtain proportions
+get_proportions <- function(df){
+  prop_out <- df %>%
+    group_by(work_cl) %>%
+    summarize(n_stroke = sum(stroke),
+              n_total = n()) %>%
+    mutate(p_hat = n_stroke/n_total)
+  return(prop_out)
+}
+
+#testing that it works for observed data
+get_proportions(stroke_raw)
+
+# Function to create a bootstrap sample
+create_bootstrap <- function(df){
+  bootstrap_out <- df %>%
+    slice_sample(prop = 1, replace = TRUE)
+  return(bootstrap_out)
+}
+
+# check that there is only one observation per id
+stroke_raw %>%
+  group_by(id) %>%
+  tally() %>%
+  arrange(desc(n)) %>% View()
+
+# test the bootstrap creation
+boot_ex <- create_bootstrap(stroke_raw)
+
+# see that the bootstrapped sample works as intended, multiple rows per id
+boot_ex %>%
+  group_by(id) %>%
+  tally() %>%
+  arrange(desc(n)) %>% View()
+
+# Function that gets a bootstrapped sample and then calculates proportion
+get_boot_proportion <- function(df){
+  out <- create_bootstrap(df) %>%
+    get_proportions()
+  return(out)
+}
+
+# compare our original summary to the summary of the bootstrapped data
+prop_summary
+
+get_boot_proportion(stroke_raw)
+
+# Getting all the proportions together:
+bootstrap_results <- map_dfr(1:2000, function(x) get_boot_proportion(stroke_raw))
+
+# Plot bootstrapped distribution by work category
+ggplot(data = bootstrap_results) +
+  geom_histogram(aes(x = p_hat)) +
+  facet_wrap(~work_cl, scales = "free") +
+  theme_bw()
+
+# Calculate the bootstrapped CI
+bootstrapped_ci <- bootstrap_results %>%
+  group_by(work_cl) %>%
+  summarize(lower_ci = quantile(p_hat, 0.025),
+            upper_ci = quantile(p_hat, 0.975))
+
+```
+
+(7) Compare your Wald and bootstrapped CI.
+
+```{r}
+
+bootstrapped_ci
+
+prop_summary %>%
+  select(work_cl, lower_ci, upper_ci)
+
+
+
+```
+
+They are pretty close!

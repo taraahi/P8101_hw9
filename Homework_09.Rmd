@@ -1,0 +1,390 @@
+---
+title: "Homework 09"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(knitr)
+library(broom)
+library(gtsummary)
+library(dplyr)
+library(magrittr)
+library(lubridate)
+library(patchwork)
+```
+
+## Question 1
+
+### a)
+
+Download the latest US State-level COVID-19 dataset from the New York Times data portal from https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-states.csv. You should be able to use `read_csv()` to immediately download this data as long as you are connected to the internet.
+
+
+```{r}
+nyt_data <- read_csv("https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-states.csv")
+```
+
+### b)
+
+Calculate and report in a sentence the mean number of new COVID deaths reported in New York from January 1st, 2022 to now. In order to do this:
+
+(1) First filter the COVID State dataset to contain only information from New York
+(2) Next, arrange the observations according to date.
+(3) Create a new variable called `new_deaths` by using `mutate(new_deaths = deaths - lag(deaths))`. The `lag()` function will look backward one observation to obtain cases from the previous day.
+(4) Filter the data frame to only include dates from 01/01/22 onwards. This column should be in date format, so using >= logic will work.
+
+```{r}
+ny_nyt_df <- nyt_data %>% 
+  filter(state == "New York") %>% 
+  arrange(desc(date)) %>% 
+  mutate(new_deaths = deaths - lag(deaths)) %>% 
+  filter(date >= "2022-01-01") 
+
+```
+
+### c)
+
+Compute and report the 95% confidence interval of the mean number of new deaths reported (using the standard formula for SE) in New York over from 01/01/22 onward.
+
+```{r}
+mean_df <- ny_nyt_df %>% 
+  group_by(state) %>% 
+  summarize(mean_new_deaths = mean(new_deaths), total_new_deaths = n()) %>% 
+  mutate(p_hat = mean_new_deaths/total_new_deaths,
+         se = sqrt(p_hat*(1-p_hat)/total_new_deaths),
+              lower_ci = p_hat - 1.96*se,
+              upper_ci = p_hat + 1.96*se)
+
+```
+
+### d)
+
+Now compute and report the the 95% confidence interval of the mean number of new deaths reported (using bootstrapping to obtain the empirical 95% confidence interval) in New York over from 01/01/22 onward. Use 2000 bootstrap replicates to construct your confidence interval, and *include a histogram of the distribution of bootstrapped mean reported deaths.*
+
+```{r}
+#getting the mean
+
+get_mean <- function(df){
+  deaths <- df %>% 
+    pull(new_deaths)
+  mean_new_deaths <- mean(deaths)
+  return(mean_new_deaths)
+}
+
+point_estimate <- get_mean(ny_nyt_df)
+point_estimate
+
+#bootstrapped sample
+boot_sample <- function(df) {
+  boot_df <- df %>% 
+    slice_sample(prop = 1, replace = TRUE)
+  return(boot_df)
+}
+
+#obs data vs bootstrap data
+ny_nyt_df
+boot_sample(ny_nyt_df)
+
+#combine functions
+bootstrap_mean_function <- function(df){
+  boot_df <- boot_sample(df)
+  boot_stat <- get_mean(boot_df)
+  return(boot_stat)
+}
+
+#run a bunch of times
+bootstrap_mean_function(ny_nyt_df)
+bootstrap_running <- map_dbl(1:2000, function(x) bootstrap_mean_function(ny_nyt_df))
+res_tibble <- tibble(run = 1:2000, mean = bootstrap_running)
+
+#plotting
+ggplot(data = res_tibble) +
+  geom_histogram(aes(x = mean), bins = 50, fill = "blue", color = "navy")
+
+#CI
+lower_ci <- quantile(bootstrap_running, 0.025, na.rm = TRUE)
+upper_ci <- quantile(bootstrap_running, 0.975, na.rm = TRUE)
+
+lower_ci
+upper_ci
+
+```
+
+
+### e)
+
+Compare the confidence intervals in parts (c) and (d). Are they the same? Different? If they are different, which confidence interval is wider, and by how much?
+
+__In part c, the confidence intervals didn't return. This is likely due to the negative values in the new_deaths column that resulted from the provided code. In part d, the confidence interval that resulted was negative (-108.80, -74.32). In theory, the two should be very similar.__
+
+### f)
+
+Select five states of your choosing and create a line graph showing newly reported COVID-19 daily deaths from 01/01/21 onward, with states differentiated by color. Make at least *(3)* improvements to a basic ggplot (think about labeling, custom colors, themes, etc)
+
+```{r}
+
+five_states <- nyt_data %>% 
+  filter(state == "California" | state == "New York" | state == "Florida" | state == "Texas" | state == "Illinois") %>% 
+  mutate(new_deaths = deaths - lag(deaths)) %>% 
+  filter(date >= 2021-01-01)
+
+ggplot(data = five_states) +
+  geom_line(aes(x = date, y = new_deaths, group = state, color = state)) +
+  labs(title = "Covid Deaths by State since 2021", x = "Date", y = "New Deaths", color = "State") +
+  scale_color_manual(values = c("California" = "orange", "New York" = "purple", "Florida" = "green", "Texas" = "red", "Illinois" = "pink")) +
+                       theme_classic()
+
+```
+
+## Question 2
+
+You have received two raw datasets containing the exposure status and demographics for a small pilot study. The data is currently a bit messy, so your first goal is to clean it and produce a small table 1 describing the demographics between two groups.
+
+### a)
+
+Load the `pilot_exposure.csv` and `pilot_demo.csv` files into your environment. Figure out how to join them together so only participants with exposure information are included in the final file.
+
+```{r}
+pilot_exposure <- read_csv("data/pilot_exposure.csv")
+pilot_demo <- read_csv("data/pilot_demo.csv")
+
+#pilot_exposure requires some reformatting of the ID variable
+
+pilot_exposure_edited <- pilot_exposure %>% 
+  mutate(id_number = str_remove(id_number, "STUDY-114:ID:"),
+         id_number = as.numeric(id_number)
+         )
+
+pilot_combined <- left_join(pilot_exposure_edited, pilot_demo, by = "id_number")
+#checked that they all have exposure statuses
+
+```
+
+### b)
+
+You have been asked to clean up the demographic data and code variables into the following categories:
+
+**Gender**
+"Male" and "Female"
+(Current coding has 0 = Male and 1 = Female)
+
+**Ethnicity**
+"Hispanic" and "Non-Hispanic"
+
+**Race**
+"White", "Black", "Unknown"
+
+**Marital Status**
+"Single/Separated/Divorced" and "Married"
+
+Use string manipulation functions to create these variables and categories.
+
+```{r}
+pilot_combined_edited <- pilot_combined %>% 
+  mutate(gender = case_when(str_detect(gender, "0") ~ "Male",
+                                  str_detect(gender, "1") ~ "Female")) %>% 
+  mutate(ethnicity = case_when(str_detect(eth, "N-Hispanic") ~ "Non-Hispanic",
+                                     str_detect(eth, "isp") ~ "Hispanic")) %>% 
+  mutate(race = case_when(str_detect(race, "Unknown|unk|not known") ~ "Unknown",
+                          str_detect(race, "WHITE|white|White|wh") ~ "White",
+                          str_detect(race, "BLACK|black|Black") ~ "Black")) %>% 
+  mutate(marital_status = case_when(str_detect(marital, "single|Sin|DEFINITELY S|Separated|divorced|Div") ~ "Single/Separated/Divorced",
+                                    str_detect(marital, "marred|Maried")~"Married"))
+
+```
+
+### c)
+
+Now that the variables have been cleaned, create a descriptive table of the entire sample using `tbl_summary()`.
+
+Make sure:
+
+(1) You include your cleaned gender, race, ethnicity, and marital status variables as well as age and education in years in your table.
+(2) Categorical variables are summarized using n(%) and continuous variables are summarized using mean(sd).
+(3) Each variable is labeled, not left with just a raw variable name.
+
+```{r}
+pilot_combined_edited %>% 
+  select(edu_yrs, age, ethnicity, gender, race, marital_status) %>% 
+  tbl_summary(statistic = list(all_continuous() ~ "{mean} ({sd}); ({min}, {max})",
+                               all_categorical() ~ "{n} ({p}%)"),
+              label = list(gender ~ "Gender", age ~ "Age", ethnicity ~ "Ethnicity", race ~ "Race", marital_status ~ "Marital Status", edu_yrs ~ "Years of Education")) %>% 
+  bold_labels()
+
+```
+
+### d)
+
+Now create a table with the same variables split by exposure group status. Include a column that shows the p-value for tests for differences between exposure groups for all variables. Make sure that the tests used for continuous variables are two-sample t-tests assuming equal variances.
+
+```{r}
+pilot_combined_edited %>% 
+  select(gender, ethnicity, race, marital_status, age, edu_yrs, exposure_status) %>% 
+  mutate(age = as.numeric(age)) %>% 
+  mutate(edu_yrs = as.numeric(edu_yrs)) %>% 
+  tbl_summary(by = exposure_status,
+              label = list(gender ~ "Gender",
+                           age ~ "Age",
+                           ethnicity ~ "Ethnicity", 
+                           race ~ "Race", 
+                           marital_status ~ "Marital Status", 
+                           edu_yrs ~ "Years of Education"),
+              missing_text = "Missing",
+              statistic = all_continuous() ~ "{mean} ({sd}); ({min}, {max})") %>%
+  bold_labels() %>%
+  add_overall() %>%  # add an overall column
+  add_p(test = all_continuous() ~ "t.test", # adding a p-value
+        test.args = all_tests("t.test") ~ list(var.equal = TRUE)) # change options for a test that generates the pvalue
+
+
+```
+
+
+## Question 3
+
+Last week you explored associations between skeletal/girth measures and obesity status. For this problem, we'll be returning to those models using the same `body_measures.csv` dataset.
+
+### a)
+
+**If you did not complete Q3 in HW08:** you must fit logistic regression models to explore the relationship between obesity status and three skeletal/girth measurements of your choice. This means you need to calculate BMI and create the 0/1 obesity outcome based on a BMI >= 30. You should result in 3 models, each one exploring the relationship between a measurement and obesity status. Your models can include adjustment for other variables if you wish.
+
+**If you completed Q3 in HW08:** you can cut/paste your code from that assignment to set up the data and re-fit your three obesity status models.
+
+```{r}
+body_measures <- read_csv("data/body_measures.csv")
+
+clean_body <- body_measures %>% 
+  mutate(bmi = weight / ((height/100)^2)) %>% 
+  mutate(obese = if_else(bmi >= 30, 1, 0))
+
+#chest girth vs obesity status
+chest_obese_model <- glm(obese ~ chest_girth, family = "binomial", data = clean_body)
+
+tidy_chest_obese_model <- tidy(chest_obese_model, exponentiate = TRUE, conf.int = TRUE) 
+kable(tidy_chest_obese_model)
+
+#waist girth vs obesity status
+waist_obese_model <- glm(obese ~ waist_girth, family = "binomial", data = clean_body)
+tidy_waist_obese_model <- tidy(waist_obese_model, exponentiate = TRUE, conf.int = TRUE)
+kable(tidy_waist_obese_model)
+
+#hip girth vs obesity status
+hip_obese_model <- glm(obese ~ hip_girth, family = "binomial", data = clean_body)
+tidy_hip_obese_model <- tidy(hip_obese_model, exponentiate = TRUE, conf.int = TRUE)
+kable(tidy_hip_obese_model)
+```
+
+
+### b)
+
+One of your collaborators is very enthusiastic about reporting the BIC for each logistic regression model. This is a measure of overall model fit, with lower BIC indicating better fit. Use the `broom` package to access the BIC measure for each of your 3 logistic regression models and report them in a sentence using in-line coding.
+
+```{r}
+chest_bic <- glance(chest_obese_model) %>% 
+  pull(BIC)
+waist_bic <- glance(waist_obese_model) %>% 
+  pull(BIC)
+hip_bic <- glance(hip_obese_model) %>% 
+  pull(BIC)
+```
+
+The chest girth BIC measure is `r chest_bic`, the waist girth BIC measures is `r waist_bic` and the hip girth BIC measure is `r hip_bic`.
+
+### c)
+
+Excited by the prospect of comparing models based on BIC, your colleague asks you to calculate the 95% CI for the BIC of each model. Unfortunately, you can't find a formula anywhere online to do this -- so you decide to bootstrap them using 1000 replicates. Show the simulated bootstrap distribution of BIC values for each model, and report the empirical 95% confidence interval for each model.
+
+```{r}
+#function
+get_bic <- function(df, exposure){
+  model <- glm(obese ~ exposure, family = "binomial", data = df)
+  BIC <- glance(model) %>% 
+    pull(BIC)
+  return(BIC)
+}
+
+#test
+estimate_chest <- get_bic(clean_body, clean_body$chest_girth)
+estimate_chest
+#same as before
+
+#bootstrap
+create_bootstrap <- function(df){
+  bootstrap_out <- df %>%
+    slice_sample(prop = 1, replace = TRUE)
+  return(bootstrap_out)
+}
+
+# see that the bootstrapped sample works as intended, multiple rows per id
+#chest_obese_model %>%
+ # group_by(id) %>%
+  #tally() %>%
+  #arrange(desc(n)) %>% 
+  #View()
+
+#combine functions
+bootstrap_bic <- function(df, exposure){
+  out <- create_bootstrap(df)
+  bic_out <- get_bic(out, exposure)
+  return(bic_out)
+}
+
+#apply
+bootstrap_chest <- map_dbl(1:1000, function(x) bootstrap_bic(clean_body, clean_body$chest_girth))
+bootstrap_waist <- map_dbl(1:1000, function(x) bootstrap_bic(clean_body, clean_body$waist_girth))
+bootstrap_hip <- map_dbl(1:1000, function(x) bootstrap_bic(clean_body, clean_body$hip_girth))
+
+chest_LL <- quantile(bootstrap_chest, 0.025, na.rm = TRUE)
+chest_UL <- quantile(bootstrap_chest, 0.975, na.rm = TRUE)
+
+waist_LL <- quantile(bootstrap_waist, 0.025, na.rm = TRUE)
+waist_UL <- quantile(bootstrap_waist, 0.975, na.rm = TRUE)
+
+hip_LL <- quantile(bootstrap_hip, 0.025, na.rm = TRUE)
+hip_UL <- quantile(bootstrap_hip, 0.975, na.rm = TRUE)
+
+```
+
+### d)
+
+Next up, you've been asked to produce a combined plot of the OR's and 95% CI for your measurements of interest and the BIC and bootstrapped 95% CI for each model in a "forest plot" type layout.
+
+To do this:
+(1) Create one plot of the OR's and 95% CI for your three measurements association with obesity.
+(2) Create a second plot of the BIC's and 95% CI for your three models.
+(3) Combine the two plots using `patchwork`.
+
+Make sure that:
+(1) Your two sub-plots have consistent themes.
+(2) Your axes are properly labeled, and the variables and models have clear descriptions (not raw variable names).
+(3) You indicate somehow that the 95% CI for BIC has been bootstrapped.
+
+```{r}
+tidy_chest <- tidy(chest_obese_model, exponentiate = TRUE, conf.int = TRUE) %>% 
+  filter(term == "chest_girth")
+kable(tidy_chest)
+
+tidy_waist <- tidy(waist_obese_model, exponentiate = TRUE, conf.int = TRUE) %>% 
+  filter(term == "waist_girth")
+kable(tidy_waist)
+
+tidy_hip <- tidy(hip_obese_model, exponentiate = TRUE, conf.int = TRUE) %>% 
+  filter(term == "hip_girth")
+kable(tidy_hip)
+
+or_df <- bind_rows(tidy_chest, tidy_waist, tidy_hip) %>% 
+  select(term, estimate)
+
+bic_df <- tibble(term=c('chest', 'waist', 'hip'), bic=c(estimate_chest, estimate_waist, estimate_hip))
+
+
+```
+
+### e)
+
+Based on the 95% CI's in your graph in (e), would you say that the BIC for your three models differ? Why or why not?
