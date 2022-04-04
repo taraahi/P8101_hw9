@@ -41,7 +41,7 @@ Calculate and report in a sentence the mean number of new COVID deaths reported 
 ```{r}
 ny_nyt_df <- nyt_data %>% 
   filter(state == "New York") %>% 
-  arrange(desc(date)) %>% 
+  arrange(date) %>% 
   mutate(new_deaths = deaths - lag(deaths)) %>% 
   filter(date >= "2022-01-01") 
 
@@ -54,13 +54,17 @@ Compute and report the 95% confidence interval of the mean number of new deaths 
 ```{r}
 mean_df <- ny_nyt_df %>% 
   group_by(state) %>% 
-  summarize(mean_new_deaths = mean(new_deaths), total_new_deaths = n()) %>% 
-  mutate(p_hat = mean_new_deaths/total_new_deaths,
-         se = sqrt(p_hat*(1-p_hat)/total_new_deaths),
-              lower_ci = p_hat - 1.96*se,
-              upper_ci = p_hat + 1.96*se)
+  summarize(mean_new_deaths = mean(new_deaths), 
+            total_new_deaths = n(),
+            se = sd(new_deaths)/sqrt(total_new_deaths),
+            lower_ci = mean_new_deaths - 1.96*se,
+            upper_ci = mean_new_deaths + 1.96*se)
 
 ```
+
+**Between January 1, 2022 and March 30th, 2022 the NY State averaged 90.7 new COVID-19 deaths per day. We are 95% confident that the true mean number of deaths is between 73.3 and 108 after using the empirical bootstrap method.**
+
+_Note: for some reason inline r code wouldn't recognize my variables here_
 
 ### d)
 
@@ -107,20 +111,22 @@ ggplot(data = res_tibble) +
   geom_histogram(aes(x = mean), bins = 50, fill = "blue", color = "navy")
 
 #CI
-lower_ci <- quantile(bootstrap_running, 0.025, na.rm = TRUE)
-upper_ci <- quantile(bootstrap_running, 0.975, na.rm = TRUE)
+bootstrap_LL <- quantile(bootstrap_running, 0.025, na.rm = TRUE)
+bootstrap_UL <- quantile(bootstrap_running, 0.975, na.rm = TRUE)
 
-lower_ci
-upper_ci
+point_estimate
+bootstrap_LL
+bootstrap_UL
 
 ```
 
+**Between January 1, 2022 and March 30th, 2022 the NY State averaged `r round(point_estimate, 2)` new COVID-19 deaths per day. We are 95% confident that the true mean number of deaths is between `r round(bootstrap_LL, 2)` and `r round(bootstrap_UL, 2)` after using the empirical bootstrap method.**
 
 ### e)
 
 Compare the confidence intervals in parts (c) and (d). Are they the same? Different? If they are different, which confidence interval is wider, and by how much?
 
-__In part c, the confidence intervals didn't return. This is likely due to the negative values in the new_deaths column that resulted from the provided code. In part d, the confidence interval that resulted was negative (-108.80, -74.32). In theory, the two should be very similar.__
+__The confidence intervals are very similar: (73.3, 108) and (72.999, 109.036). The results we get from bootstrapping will differ slightly each time we run it. Here, the confidence interval from bootstrapping is just slightly wider, the range is smaller by 1.33.__
 
 ### f)
 
@@ -129,14 +135,16 @@ Select five states of your choosing and create a line graph showing newly report
 ```{r}
 
 five_states <- nyt_data %>% 
-  filter(state == "California" | state == "New York" | state == "Florida" | state == "Texas" | state == "Illinois") %>% 
+  filter(state == "Georgia" | state == "New York" | state == "Florida" | state == "Texas" | state == "Illinois") %>% 
+  arrange(date) %>% 
+  group_by(state) %>% 
   mutate(new_deaths = deaths - lag(deaths)) %>% 
-  filter(date >= 2021-01-01)
+  filter(date >= "2021-01-01")
 
 ggplot(data = five_states) +
-  geom_line(aes(x = date, y = new_deaths, group = state, color = state)) +
+  geom_line(aes(x = date, y = new_deaths, group = state, color = state), alpha = 0.7) +
   labs(title = "Covid Deaths by State since 2021", x = "Date", y = "New Deaths", color = "State") +
-  scale_color_manual(values = c("California" = "orange", "New York" = "purple", "Florida" = "green", "Texas" = "red", "Illinois" = "pink")) +
+  scale_color_manual(values = c("Georgia" = "orange", "New York" = "purple", "Florida" = "green", "Texas" = "red", "Illinois" = "pink")) +
                        theme_classic()
 
 ```
@@ -160,7 +168,9 @@ pilot_exposure_edited <- pilot_exposure %>%
          id_number = as.numeric(id_number)
          )
 
-pilot_combined <- left_join(pilot_exposure_edited, pilot_demo, by = "id_number")
+pilot_combined <- left_join(pilot_exposure_edited, pilot_demo, by = "id_number") %>% 
+  rename(ethnicity = eth) %>% 
+  rename(marital_status = marital)
 #checked that they all have exposure statuses
 
 ```
@@ -188,13 +198,13 @@ Use string manipulation functions to create these variables and categories.
 pilot_combined_edited <- pilot_combined %>% 
   mutate(gender = case_when(str_detect(gender, "0") ~ "Male",
                                   str_detect(gender, "1") ~ "Female")) %>% 
-  mutate(ethnicity = case_when(str_detect(eth, "N-Hispanic") ~ "Non-Hispanic",
-                                     str_detect(eth, "isp") ~ "Hispanic")) %>% 
+  mutate(ethnicity = case_when(str_detect(ethnicity, "N-Hispanic") ~ "Non-Hispanic",
+                                     str_detect(ethnicity, "isp") ~ "Hispanic")) %>% 
   mutate(race = case_when(str_detect(race, "Unknown|unk|not known") ~ "Unknown",
                           str_detect(race, "WHITE|white|White|wh") ~ "White",
                           str_detect(race, "BLACK|black|Black") ~ "Black")) %>% 
-  mutate(marital_status = case_when(str_detect(marital, "single|Sin|DEFINITELY S|Separated|divorced|Div") ~ "Single/Separated/Divorced",
-                                    str_detect(marital, "marred|Maried")~"Married"))
+  mutate(marital_status = case_when(str_detect(marital_status, "single|Sin|DEFINITELY S|Separated|divorced|Div") ~ "Single/Separated/Divorced",
+                                    str_detect(marital_status, "marred|Maried")~"Married"))
 
 ```
 
@@ -228,14 +238,15 @@ pilot_combined_edited %>%
   mutate(age = as.numeric(age)) %>% 
   mutate(edu_yrs = as.numeric(edu_yrs)) %>% 
   tbl_summary(by = exposure_status,
-              label = list(gender ~ "Gender",
+              statistic = list(all_continuous() ~ "{mean} ({sd})"),
+              type = list(edu_yrs = "continuous"),
+              label = list(exposure_status = "Exposure Status",
+                          gender ~ "Gender",
                            age ~ "Age",
                            ethnicity ~ "Ethnicity", 
                            race ~ "Race", 
                            marital_status ~ "Marital Status", 
-                           edu_yrs ~ "Years of Education"),
-              missing_text = "Missing",
-              statistic = all_continuous() ~ "{mean} ({sd}); ({min}, {max})") %>%
+                           edu_yrs ~ "Years of Education")) %>% 
   bold_labels() %>%
   add_overall() %>%  # add an overall column
   add_p(test = all_continuous() ~ "t.test", # adding a p-value
@@ -285,33 +296,47 @@ kable(tidy_hip_obese_model)
 One of your collaborators is very enthusiastic about reporting the BIC for each logistic regression model. This is a measure of overall model fit, with lower BIC indicating better fit. Use the `broom` package to access the BIC measure for each of your 3 logistic regression models and report them in a sentence using in-line coding.
 
 ```{r}
-chest_bic <- glance(chest_obese_model) %>% 
-  pull(BIC)
-waist_bic <- glance(waist_obese_model) %>% 
-  pull(BIC)
-hip_bic <- glance(hip_obese_model) %>% 
-  pull(BIC)
+chest_bic <- glance(chest_obese_model)
+waist_bic <- glance(waist_obese_model) 
+hip_bic <- glance(hip_obese_model)
 ```
 
-The chest girth BIC measure is `r chest_bic`, the waist girth BIC measures is `r waist_bic` and the hip girth BIC measure is `r hip_bic`.
+**The chest girth BIC measure is `r round(chest_bic, 2)`, the waist girth BIC measures is `r round(waist_bic, 2)` and the hip girth BIC measure is `r round(hip_bic, 2)`.**
 
 ### c)
 
 Excited by the prospect of comparing models based on BIC, your colleague asks you to calculate the 95% CI for the BIC of each model. Unfortunately, you can't find a formula anywhere online to do this -- so you decide to bootstrap them using 1000 replicates. Show the simulated bootstrap distribution of BIC values for each model, and report the empirical 95% confidence interval for each model.
 
 ```{r}
-#function
-get_bic <- function(df, exposure){
-  model <- glm(obese ~ exposure, family = "binomial", data = df)
+
+#function for each measure
+get_bic_chest <- function(df){
+  model <- glm(obese ~ chest_girth, family = "binomial", data = df)
+  BIC <- glance(model) %>% 
+    pull(BIC)
+  return(BIC)
+}
+
+get_bic_waist <- function(df){
+  model <- glm(obese ~ waist_girth, family = "binomial", data = df)
+  BIC <- glance(model) %>% 
+    pull(BIC)
+  return(BIC)
+}
+
+get_bic_hip <- function(df){
+  model <- glm(obese ~ hip_girth, family = "binomial", data = df)
   BIC <- glance(model) %>% 
     pull(BIC)
   return(BIC)
 }
 
 #test
-estimate_chest <- get_bic(clean_body, clean_body$chest_girth)
-estimate_chest
+#estimate_chest <- get_bic(clean_body, clean_body$chest_girth)
+#estimate_chest
 #same as before
+
+get_bic_chest(clean_body)
 
 #bootstrap
 create_bootstrap <- function(df){
@@ -320,33 +345,80 @@ create_bootstrap <- function(df){
   return(bootstrap_out)
 }
 
-# see that the bootstrapped sample works as intended, multiple rows per id
-#chest_obese_model %>%
- # group_by(id) %>%
-  #tally() %>%
-  #arrange(desc(n)) %>% 
-  #View()
 
-#combine functions
-bootstrap_bic <- function(df, exposure){
-  out <- create_bootstrap(df)
-  bic_out <- get_bic(out, exposure)
-  return(bic_out)
+combo_chest <- function(df){
+  bootstrap_out <- create_bootstrap(df)
+  boot_stat <- get_bic_chest(bootstrap_out)
+  return(boot_stat)
 }
 
+combo_chest(clean_body)
+
+combo_waist <- function(df){
+  bootstrap_out <- create_bootstrap(df)
+  boot_stat <- get_bic_waist(bootstrap_out)
+  return(boot_stat)
+}
+
+combo_waist(clean_body)
+
+combo_hip <- function(df){
+  bootstrap_out <- create_bootstrap(df)
+  boot_stat <- get_bic_hip(bootstrap_out)
+  return(boot_stat)
+}
+
+combo_hip(clean_body)
+
 #apply
-bootstrap_chest <- map_dbl(1:1000, function(x) bootstrap_bic(clean_body, clean_body$chest_girth))
-bootstrap_waist <- map_dbl(1:1000, function(x) bootstrap_bic(clean_body, clean_body$waist_girth))
-bootstrap_hip <- map_dbl(1:1000, function(x) bootstrap_bic(clean_body, clean_body$hip_girth))
 
-chest_LL <- quantile(bootstrap_chest, 0.025, na.rm = TRUE)
-chest_UL <- quantile(bootstrap_chest, 0.975, na.rm = TRUE)
+##chest
+bootstrap_chest <- map_dbl(1:1000, function(x) combo_chest(clean_body))
 
-waist_LL <- quantile(bootstrap_waist, 0.025, na.rm = TRUE)
-waist_UL <- quantile(bootstrap_waist, 0.975, na.rm = TRUE)
+res_tibble_chest <- tibble(run = 1:1000, BIC = bootstrap_chest)
 
-hip_LL <- quantile(bootstrap_hip, 0.025, na.rm = TRUE)
-hip_UL <- quantile(bootstrap_hip, 0.975, na.rm = TRUE)
+ggplot(data = res_tibble_chest) +
+  geom_histogram(aes(x = BIC), bins = 50, fill = "darkgreen", color = "white") +
+  theme_bw() +
+  labs(title = "Chest Girth Bootstrapped BIC")
+
+lower_ci_chest <- quantile(bootstrap_chest, 0.0275)
+upper_ci_chest <- quantile(bootstrap_chest, 0.975)
+
+lower_ci_chest
+upper_ci_chest
+
+##waist
+bootstrap_waist <- map_dbl(1:1000, function(x) combo_waist(clean_body))
+
+res_tibble_waist <- tibble(run = 1:1000, BIC = bootstrap_waist)
+
+ggplot(data = res_tibble_waist) +
+  geom_histogram(aes(x = BIC), bins = 50, fill = "violet", color = "white") +
+  theme_bw() +
+  labs(title = "Waist Girth Bootstrapped BIC")
+
+lower_ci_waist <- quantile(bootstrap_waist, 0.0275)
+upper_ci_waist <- quantile(bootstrap_waist, 0.975)
+
+lower_ci_waist
+upper_ci_waist
+
+#hip
+bootstrap_hip <- map_dbl(1:1000, function(x) combo_hip(clean_body))
+
+res_tibble_hip <- tibble(run = 1:1000, BIC = bootstrap_hip)
+
+ggplot(data = res_tibble_hip) +
+  geom_histogram(aes(x = BIC), bins = 50, fill = "navy", color = "white") +
+  theme_bw() +
+  labs(title = "Hip Girth Bootstrapped BIC")
+
+lower_ci_hip <- quantile(bootstrap_hip, 0.0275)
+upper_ci_hip <- quantile(bootstrap_hip, 0.975)
+
+lower_ci_hip
+upper_ci_hip
 
 ```
 
@@ -366,25 +438,69 @@ Make sure that:
 
 ```{r}
 tidy_chest <- tidy(chest_obese_model, exponentiate = TRUE, conf.int = TRUE) %>% 
+  mutate(outcome = "Obese") %>% 
   filter(term == "chest_girth")
 kable(tidy_chest)
 
 tidy_waist <- tidy(waist_obese_model, exponentiate = TRUE, conf.int = TRUE) %>% 
+    mutate(outcome = "Obese") %>% 
   filter(term == "waist_girth")
 kable(tidy_waist)
 
 tidy_hip <- tidy(hip_obese_model, exponentiate = TRUE, conf.int = TRUE) %>% 
+    mutate(outcome = "Obese") %>% 
   filter(term == "hip_girth")
 kable(tidy_hip)
 
 or_df <- bind_rows(tidy_chest, tidy_waist, tidy_hip) %>% 
-  select(term, estimate)
+  mutate(term_name = case_when(term == "chest_girth" ~ "Chest Girth (cm)",
+                               term == "waist_girth" ~ "Waist Girth (cm)",
+                               term == "hip_girth" ~ "Hip Girth (cm)"))
 
-bic_df <- tibble(term=c('chest', 'waist', 'hip'), bic=c(estimate_chest, estimate_waist, estimate_hip))
+#first plot
+or_plot <- ggplot(data = or_df) +
+  geom_pointrange(aes(x = estimate, y = term_name, xmin = conf.low, xmax = conf.high)) +
+  theme_classic() +
+  geom_vline(aes(xintercept = 1), linetype = "dashed") +
+  labs(x = "OR", y = "Body Measure", title = "Odds Ratios for the Association Between Body Measurement and Obesity")
 
+or_plot
+
+#BIC plots
+
+chest_bic <- chest_bic %>% 
+  mutate(lower_ci_BIC = lower_ci_chest,
+         upper_ci_BIC = upper_ci_chest,
+         term = "chest_girth")
+
+waist_bic <- waist_bic %>% 
+  mutate(lower_ci_BIC = lower_ci_waist,
+         upper_ci_BIC = upper_ci_waist,
+         term = "waist_girth")
+
+hip_bic <- hip_bic %>% 
+  mutate(lower_ci_BIC = lower_ci_hip,
+         upper_ci_BIC = upper_ci_hip,
+         term = "hip_girth")
+
+all_bics <- bind_rows(chest_bic, waist_bic, hip_bic) %>% 
+  mutate(term_name = case_when(term == "chest_girth" ~ "Chest Girth (cm)",
+                               term == "waist_girth" ~ "Waist Girth (cm)",
+                               term == "hip_girth" ~ "Hip Girth (cm)"))
+
+bic_plot <- ggplot(data = all_bics) +
+  geom_pointrange(aes(x = BIC, y = term_name, xmin = lower_ci_BIC, xmax = upper_ci_BIC)) +
+  theme_classic() +
+  labs(x = "BIC", y = "Body Measurement", title = "BICs for three body measurement/obesity models (Bootstrapping approach)")
+
+bic_plot
+
+or_plot / bic_plot
 
 ```
 
 ### e)
 
 Based on the 95% CI's in your graph in (e), would you say that the BIC for your three models differ? Why or why not?
+
+__Based on the 95% confidence intervals in the graph in (e), I would say that the BIC for my three models slightly differ, but are not statistically significantly different. As we can see from the stacked plots, the confidence intervals overlap with each other.__
